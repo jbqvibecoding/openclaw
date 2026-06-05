@@ -4,6 +4,7 @@ import path from "node:path";
 import type { EmbeddedRunAttemptParams } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CODEX_GPT5_BEHAVIOR_CONTRACT } from "../../prompt-overlay.js";
+import { createCodexTestModel } from "./test-support.js";
 import {
   buildDeveloperInstructions,
   buildTurnCollaborationMode,
@@ -17,7 +18,6 @@ import {
   startOrResumeThread,
   type CodexThreadLifecycleTimingLogger,
 } from "./thread-lifecycle.js";
-import { createCodexTestModel } from "./test-support.js";
 
 let tempDir: string;
 
@@ -222,6 +222,41 @@ describe("Codex app-server native code mode config", () => {
     expect(instructions).not.toContain("message,");
   });
 
+  it("ignores unreadable deferred dynamic tool names in developer instructions", () => {
+    const unreadableName = Object.defineProperty(
+      {
+        description: "Broken tool",
+        inputSchema: { type: "object" },
+        namespace: "openclaw",
+        deferLoading: true,
+      },
+      "name",
+      {
+        enumerable: true,
+        get() {
+          throw new Error("name exploded");
+        },
+      },
+    );
+    const instructions = buildDeveloperInstructions(createAttemptParams({ provider: "openai" }), {
+      dynamicTools: [
+        unreadableName,
+        {
+          name: "image_generate",
+          description: "Create images",
+          inputSchema: { type: "object" },
+          namespace: "openclaw",
+          deferLoading: true,
+        },
+      ] as never,
+    });
+
+    expect(instructions).toContain(
+      "Deferred searchable OpenClaw dynamic tools available: image_generate.",
+    );
+    expect(instructions).not.toContain("Broken tool");
+  });
+
   it("uses the shared Skill Workshop guidance when skill_workshop is available", () => {
     const instructions = buildDeveloperInstructions(createAttemptParams({ provider: "openai" }), {
       dynamicTools: [
@@ -285,6 +320,39 @@ describe("Codex app-server native code mode config", () => {
     ]);
 
     expect(searchableFingerprint).not.toBe(directFingerprint);
+  });
+
+  it("keeps dynamic tool fingerprints stable when a spec has hostile metadata", () => {
+    const hostileSchema = Object.defineProperty({ type: "object" }, "properties", {
+      enumerable: true,
+      get() {
+        throw new Error("properties exploded");
+      },
+    });
+    const unreadableName = Object.defineProperty(
+      {
+        description: "Broken tool",
+        inputSchema: { type: "object" },
+      },
+      "name",
+      {
+        enumerable: true,
+        get() {
+          throw new Error("name exploded");
+        },
+      },
+    );
+
+    expect(() =>
+      codexDynamicToolsFingerprint([
+        unreadableName,
+        {
+          name: "message",
+          description: "Send a visible message",
+          inputSchema: hostileSchema,
+        },
+      ] as never),
+    ).not.toThrow();
   });
 
   it("keeps OpenClaw skill catalogs out of developer instructions", () => {

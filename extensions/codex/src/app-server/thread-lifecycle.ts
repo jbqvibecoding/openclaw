@@ -153,10 +153,8 @@ export function shouldWarnCodexThreadLifecycleTimingSummary(
   summary: CodexThreadLifecycleTimingSummary,
   options: CodexThreadLifecycleTimingOptions = {},
 ): boolean {
-  const totalThresholdMs =
-    options.totalThresholdMs ?? CODEX_THREAD_LIFECYCLE_TIMING_WARN_TOTAL_MS;
-  const stageThresholdMs =
-    options.stageThresholdMs ?? CODEX_THREAD_LIFECYCLE_TIMING_WARN_STAGE_MS;
+  const totalThresholdMs = options.totalThresholdMs ?? CODEX_THREAD_LIFECYCLE_TIMING_WARN_TOTAL_MS;
+  const stageThresholdMs = options.stageThresholdMs ?? CODEX_THREAD_LIFECYCLE_TIMING_WARN_STAGE_MS;
   return (
     summary.totalMs >= totalThresholdMs ||
     summary.spans.some((span) => span.durationMs >= stageThresholdMs)
@@ -310,15 +308,12 @@ export async function startOrResumeThread(params: {
   // turns should not pay Date.now/span-array overhead while resuming threads.
   const lifecycleTiming = createCodexThreadLifecycleTimingTracker({
     ...params.timing,
-    enabled:
-      params.timing?.enabled ?? isCodexAppServerProfilerEnabled(params.params.config),
+    enabled: params.timing?.enabled ?? isCodexAppServerProfilerEnabled(params.params.config),
   });
   const dynamicToolsFingerprint = lifecycleTiming.measureSync("dynamic-tools-fingerprint", () =>
     fingerprintDynamicTools(params.dynamicTools),
   );
-  const dynamicToolsContainDeferred = params.dynamicTools.some(
-    (tool) => tool.deferLoading === true,
-  );
+  const dynamicToolsContainDeferred = params.dynamicTools.some(isDeferredCodexDynamicTool);
   const contextEngineBinding = lifecycleTiming.measureSync("context-engine-binding", () =>
     buildContextEngineBinding(params.params, params.contextEngineProjection),
   );
@@ -1207,9 +1202,13 @@ function fingerprintDynamicToolSpec(tool: JsonValue): JsonValue {
     return stabilizeJsonValue(tool);
   }
   const stable: JsonObject = {};
-  for (const [key, child] of Object.entries(tool).toSorted(([left], [right]) =>
-    left.localeCompare(right),
-  )) {
+  let entries: Array<[string, JsonValue]>;
+  try {
+    entries = Object.entries(tool);
+  } catch {
+    return null;
+  }
+  for (const [key, child] of entries.toSorted(([left], [right]) => left.localeCompare(right))) {
     if (key === "description") {
       continue;
     }
@@ -1226,9 +1225,13 @@ function stabilizeJsonValue(value: JsonValue): JsonValue {
     return value;
   }
   const stable: JsonObject = {};
-  for (const [key, child] of Object.entries(value).toSorted(([left], [right]) =>
-    left.localeCompare(right),
-  )) {
+  let entries: Array<[string, JsonValue]>;
+  try {
+    entries = Object.entries(value);
+  } catch {
+    return null;
+  }
+  for (const [key, child] of entries.toSorted(([left], [right]) => left.localeCompare(right))) {
     stable[key] = stabilizeJsonValue(child);
   }
   return stable;
@@ -1281,9 +1284,9 @@ function buildDeferredDynamicToolManifest(
   const deferredToolNames = [
     ...new Set(
       (dynamicTools ?? [])
-        .filter((tool) => tool.deferLoading === true)
-        .map((tool) => tool.name.trim())
-        .filter(Boolean),
+        .filter(isDeferredCodexDynamicTool)
+        .map(readCodexDynamicToolName)
+        .filter((name): name is string => Boolean(name)),
     ),
   ].toSorted((left, right) => left.localeCompare(right));
   if (deferredToolNames.length === 0) {
@@ -1296,7 +1299,7 @@ function buildSkillWorkshopInstruction(
   dynamicTools: readonly CodexDynamicToolSpec[] | undefined,
 ): string | undefined {
   const hasSkillWorkshop = (dynamicTools ?? []).some(
-    (tool) => tool.name.trim() === SKILL_WORKSHOP_TOOL_NAME,
+    (tool) => readCodexDynamicToolName(tool) === SKILL_WORKSHOP_TOOL_NAME,
   );
   if (!hasSkillWorkshop) {
     return undefined;
@@ -1309,7 +1312,7 @@ function buildVisibleReplyInstruction(
   dynamicTools: readonly CodexDynamicToolSpec[] | undefined,
 ): string {
   const messageToolAvailable = dynamicTools
-    ? dynamicTools.some((tool) => tool.name.trim() === "message")
+    ? dynamicTools.some((tool) => readCodexDynamicToolName(tool) === "message")
     : params.disableMessageTool !== true;
   if (params.sourceReplyDeliveryMode === "message_tool_only" && messageToolAvailable) {
     return "Visible source replies are not automatically delivered for this run. Use `message(action=send)` for user-visible source-channel output. Do not repeat that visible content in your final answer.";
@@ -1318,6 +1321,23 @@ function buildVisibleReplyInstruction(
     return "For the current source conversation, reply normally in your final assistant message; OpenClaw will deliver it through the active source conversation. Use `message` only for explicit out-of-band sends, media/file sends, or sends to a different target.";
   }
   return "For the current source conversation, reply normally in your final assistant message; OpenClaw will deliver it through the active source conversation.";
+}
+
+function readCodexDynamicToolName(tool: CodexDynamicToolSpec): string | undefined {
+  try {
+    const name = tool.name;
+    return typeof name === "string" ? name.trim() || undefined : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isDeferredCodexDynamicTool(tool: CodexDynamicToolSpec): boolean {
+  try {
+    return tool.deferLoading === true;
+  } catch {
+    return false;
+  }
 }
 
 function buildUserInput(
