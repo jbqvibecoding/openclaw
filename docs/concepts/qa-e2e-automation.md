@@ -688,7 +688,8 @@ Required env when `--credential-source env`:
 
 Optional:
 
-- `OPENCLAW_QA_WHATSAPP_GROUP_JID` enables `whatsapp-mention-gating`.
+- `OPENCLAW_QA_WHATSAPP_GROUP_JID` enables group scenarios such as
+  `whatsapp-mention-gating` and `whatsapp-group-allowlist-block`.
 - `OPENCLAW_QA_WHATSAPP_CAPTURE_CONTENT=1` keeps message bodies in
   observed-message artifacts.
 
@@ -697,13 +698,42 @@ Scenarios (`extensions/qa-lab/src/live-transports/whatsapp/whatsapp-live.runtime
 - `whatsapp-canary`
 - `whatsapp-pairing-block`
 - `whatsapp-mention-gating`
+- `whatsapp-top-level-reply-shape`
+- `whatsapp-restart-resume`
+- `whatsapp-help-command`
+- `whatsapp-status-reactions`
+- `whatsapp-inbound-image-caption` - included in the default `mock-openai` set
+  and selectable by id in any provider mode. Sends a real image message with a
+  caption and verifies the caption reaches the agent.
+- `whatsapp-audio-preflight` - included in the default `mock-openai` set and
+  selectable by id. Sends a real audio message, enables WhatsApp audio
+  preflight through the OpenAI media-understanding provider, and verifies the
+  deterministic mock transcription reaches the agent. It is mock-backed because
+  generated silent fixture audio is not a reliable real-provider speech-to-text
+  assertion.
+- `whatsapp-status-command` - opt-in command scenario for `/status`.
+- `whatsapp-reply-to-message` - opt-in reply-to scenario. Enables
+  `replyToMode=all` and verifies the SUT WhatsApp reply quotes the triggering
+  driver message.
+- `whatsapp-group-allowlist-block` - default standard group access-control
+  scenario when a WhatsApp QA group is configured. Requires
+  `OPENCLAW_QA_WHATSAPP_GROUP_JID` and verifies a group outside the configured
+  allowlist stays quiet.
 - `whatsapp-approval-exec-native` - opt-in native WhatsApp exec approval
   scenario. Requests an exec approval through the gateway, verifies the
   WhatsApp message has native reaction approval affordances, resolves it, and
   verifies the resolved WhatsApp follow-up.
+- `whatsapp-approval-exec-reaction-native` - opt-in native WhatsApp exec
+  approval scenario that resolves by reacting to the pending prompt from the
+  driver account instead of calling the approval resolver RPC.
 - `whatsapp-approval-plugin-native` - opt-in native WhatsApp plugin approval
   scenario. Enables exec and plugin approval forwarding together, then verifies
   the same pending/resolved native WhatsApp path.
+
+The WhatsApp QA driver observes structured live events (`text`, `media`,
+`reaction`, and `poll`) and redacts message content by default. Outbound poll
+and upload-file coverage run through deterministic gateway `poll` and
+`message.action` calls instead of model-prompt-only tool invocation.
 
 Output artifacts:
 
