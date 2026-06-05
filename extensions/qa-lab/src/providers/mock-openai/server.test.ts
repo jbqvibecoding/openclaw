@@ -293,6 +293,26 @@ describe("qa mock openai server", () => {
     expect(telegramLongBody).toContain("TELEGRAM-LONG-FINAL-END");
     expect(telegramLongBody.length).toBeGreaterThan(4_500);
 
+    const whatsappLongResponse = await fetch(`${server.baseUrl}/v1/responses`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        stream: true,
+        input: [
+          makeUserInput("WhatsApp long final QA check. Use the scripted long final response."),
+        ],
+      }),
+    });
+    expect(whatsappLongResponse.status).toBe(200);
+    const whatsappLongBody = await whatsappLongResponse.text();
+    expect(whatsappLongBody).toContain('"type":"response.output_text.delta"');
+    expect(whatsappLongBody).toContain('"phase":"final_answer"');
+    expect(whatsappLongBody).toContain("WHATSAPP-LONG-FINAL-BEGIN");
+    expect(whatsappLongBody).toContain("WHATSAPP-LONG-FINAL-END");
+    expect(whatsappLongBody.length).toBeGreaterThan(6_000);
+
     const telegramThreeChunkLongResponse = await fetch(`${server.baseUrl}/v1/responses`, {
       method: "POST",
       headers: {
@@ -2856,6 +2876,44 @@ describe("qa mock openai server", () => {
     expect(outputText(await response.json())).toBe("QA_CANARY_TEST");
   });
 
+  it("uses WhatsApp location markers only for the matching coordinate body", async () => {
+    const server = await startMockServer();
+
+    const response = await postResponses(server, {
+      stream: false,
+      input: [
+        makeUserInput(
+          "When a later WhatsApp location message shows 37.774900, -122.419400, " +
+            "reply with only this WhatsApp location marker: QA_WHATSAPP_LOCATION_OK. " +
+            "Reply with only this exact marker: QA_INITIAL_OK",
+        ),
+        makeUserInput("📍 37.774900, -122.419400"),
+      ],
+    });
+
+    expect(response.status).toBe(200);
+    expect(outputText(await response.json())).toBe("QA_WHATSAPP_LOCATION_OK");
+  });
+
+  it("streams WhatsApp location markers for the matching coordinate body", async () => {
+    const server = await startMockServer();
+
+    const body = await expectResponsesText(server, {
+      stream: true,
+      input: [
+        makeUserInput(
+          "When a later WhatsApp location message shows 37.774900, -122.419400, " +
+            "reply with only this WhatsApp location marker: QA_WHATSAPP_LOCATION_STREAM_OK. " +
+            "Reply with only this exact marker: QA_INITIAL_STREAM_OK",
+        ),
+        makeUserInput("📍 37.774900, -122.419400"),
+      ],
+    });
+
+    expect(body).toContain("QA_WHATSAPP_LOCATION_STREAM_OK");
+    expect(body).not.toContain("QA_INITIAL_STREAM_OK");
+  });
+
   it("uses image generation directives from request context when the latest user text is generic", async () => {
     const server = await startQaMockOpenAiServer({
       host: "127.0.0.1",
@@ -3482,6 +3540,30 @@ describe("qa mock openai server", () => {
     const ids = body.data.map((entry) => entry.id);
     expect(ids).toContain("claude-opus-4-8");
     expect(ids).toContain("gpt-5.5");
+    expect(ids).toContain("gpt-4o-transcribe");
+  });
+
+  it("serves deterministic OpenAI-compatible audio transcription responses", async () => {
+    const server = await startQaMockOpenAiServer({
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      await server.stop();
+    });
+
+    const response = await fetch(`${server.baseUrl}/v1/audio/transcriptions`, {
+      method: "POST",
+      headers: {
+        "content-type": "multipart/form-data; boundary=qa",
+      },
+      body: "--qa\r\n--qa--\r\n",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      text: "Reply with only this exact marker: WHATSAPP_QA_AUDIO_TRANSCRIPT_OK",
+    });
   });
 
   it("dispatches an Anthropic /v1/messages read tool call for source discovery prompts", async () => {
